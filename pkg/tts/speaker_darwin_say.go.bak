@@ -1,0 +1,90 @@
+// +build darwin
+
+package tts
+
+import (
+	"fmt"
+	"os/exec"
+	"sync"
+)
+
+// MacOSSpeaker implements Speaker using the /usr/bin/say command
+type MacOSSpeaker struct {
+	rate    int
+	voice   string
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	cancel  chan struct{}
+}
+
+// newPlatformSpeaker creates a macOS speaker
+func newPlatformSpeaker() (Speaker, error) {
+	return &MacOSSpeaker{
+		rate:   550, // Default 550 WPM
+		voice:  "Reed",
+		cancel: make(chan struct{}),
+	}, nil
+}
+
+// Speak speaks the given text (cancels any current speech)
+func (s *MacOSSpeaker) Speak(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Cancel any current speech
+	if s.cmd != nil && s.cmd.Process != nil {
+		s.cmd.Process.Kill()
+	}
+
+	// Start new speech in background
+	go s.speakAsync(text)
+}
+
+func (s *MacOSSpeaker) speakAsync(text string) {
+	s.mu.Lock()
+	// /usr/bin/say -r <rate> -v <voice> "<text>"
+	s.cmd = exec.Command("/usr/bin/say", "-r", fmt.Sprintf("%d", s.rate), "-v", s.voice, text)
+	s.mu.Unlock()
+
+	// Run and ignore errors (voice might not exist, etc.)
+	s.cmd.Run()
+}
+
+// Cancel stops any current speech
+func (s *MacOSSpeaker) Cancel() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.cmd != nil && s.cmd.Process != nil {
+		s.cmd.Process.Kill()
+		s.cmd = nil
+	}
+}
+
+// SetRate sets the speech rate in words per minute
+func (s *MacOSSpeaker) SetRate(wpm int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rate = wpm
+}
+
+// SetVoice sets the voice by name
+func (s *MacOSSpeaker) SetVoice(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.voice = name
+}
+
+// IsSpeaking returns true if currently speaking
+func (s *MacOSSpeaker) IsSpeaking() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cmd != nil && s.cmd.Process != nil
+}
+
+// Close cleans up resources
+func (s *MacOSSpeaker) Close() error {
+	s.Cancel()
+	close(s.cancel)
+	return nil
+}
