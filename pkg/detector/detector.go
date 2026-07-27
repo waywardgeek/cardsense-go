@@ -16,10 +16,10 @@ import (
 
 const (
 	// NO_CARD_FRAMES is the number of consecutive empty frames before resetting lastCard
-	NO_CARD_FRAMES = 10
+	NO_CARD_FRAMES = 5
 	
-	// Frame interval in seconds (~20 fps)
-	FRAME_INTERVAL = 50 * time.Millisecond
+	// Frame interval in milliseconds (~5 fps for reduced CPU usage)
+	FRAME_INTERVAL = 200 * time.Millisecond
 )
 
 // StatusCallback is called with status updates for the GUI
