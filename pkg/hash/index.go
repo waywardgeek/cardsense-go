@@ -327,8 +327,9 @@ func (idx *CardIndex) Identify(gray gocv.Mat, sweep bool, maxDist int, minMargin
 	
 	// Guard 1b: pHash margin must not be too low (prevents multi-card captures)
 	// If pHash can't distinguish between cards (low margin), OCR is likely reading
-	// random text from a board state rather than a single card
-	if margin < 10 {
+	// random text from a board state rather than a single card.
+	// Lowered from 10 to 3 to allow edge cases like Raise Dead (margin=4)
+	if margin < 3 {
 		return nil
 	}
 
