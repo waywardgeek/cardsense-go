@@ -1,10 +1,10 @@
 #!/bin/bash
-# Notarize cardsense.app for distribution
+# Notarize cardsense-go.app for distribution
 
 set -e  # Exit on error
 
 # Configuration
-APP_NAME="cardsense"
+APP_NAME="cardsense-go"
 DEVELOPER_ID="Developer ID Application: Bill Cox (B2SUY7SU9A)"
 KEYCHAIN_PROFILE="CardSense"
 APPLE_ID="waywardgeek@gmail.com"

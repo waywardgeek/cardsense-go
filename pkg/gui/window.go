@@ -49,8 +49,8 @@ var VOICE_MAP = map[string]string{
 
 // BuildGUI creates and shows the CardSense GUI
 func BuildGUI(dataDir string, debug bool) {
-	myApp := app.NewWithID("io.coderhapsody.cardsense")
-	myWindow := myApp.NewWindow(fmt.Sprintf("CardSense v%s", VERSION))
+	myApp := app.NewWithID("com.coderhapsody.cardsense-go")
+	myWindow := myApp.NewWindow(fmt.Sprintf("CardSense Go v%s", VERSION))
 
 	// Create speaker
 	speaker, err := tts.NewSpeaker()

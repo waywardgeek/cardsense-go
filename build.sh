@@ -4,8 +4,9 @@
 set -e  # Exit on error
 
 # Configuration
-APP_NAME="cardsense"
-BUNDLE_ID="com.coderhapsody.cardsense"
+APP_NAME="cardsense-go"
+BUNDLE_ID="com.coderhapsody.cardsense-go"
+DISPLAY_NAME="CardSense Go"
 VERSION="0.3.0"
 DEVELOPER_ID="Developer ID Application: Bill Cox (B2SUY7SU9A)"
 
@@ -77,10 +78,10 @@ cat > "$CONTENTS_DIR/Info.plist" << EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>CardSense</string>
+    <string>$DISPLAY_NAME</string>
     
     <key>CFBundleDisplayName</key>
-    <string>CardSense</string>
+    <string>$DISPLAY_NAME</string>
     
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
