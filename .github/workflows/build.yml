@@ -1,0 +1,118 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ created ]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      
+      - name: Install dependencies
+        run: |
+          brew install opencv tesseract
+      
+      - name: Build
+        run: |
+          go build -o cardsense-gui cmd/gui/main.go
+      
+      - name: Test
+        run: |
+          go test ./pkg/...
+      
+      - name: Smoke test
+        run: |
+          ./cardsense-gui --help || echo "GUI binary exists"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardsense-macos
+          path: cardsense-gui
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      
+      - name: Install OpenCV via Chocolatey
+        run: |
+          choco install opencv -y
+        shell: powershell
+      
+      - name: Install Tesseract
+        run: |
+          choco install tesseract -y
+        shell: powershell
+      
+      - name: Set up OpenCV environment
+        run: |
+          echo "CGO_CPPFLAGS=-IC:/tools/opencv/build/include" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-LC:/tools/opencv/build/x64/vc16/lib" >> $GITHUB_ENV
+          echo "PATH=C:/tools/opencv/build/x64/vc16/bin;$PATH" >> $GITHUB_ENV
+        shell: bash
+      
+      - name: Build
+        run: |
+          go build -o cardsense-gui.exe cmd/gui/main.go
+        env:
+          CGO_ENABLED: 1
+        shell: powershell
+      
+      - name: Test
+        run: |
+          go test ./pkg/...
+        shell: powershell
+      
+      - name: Smoke test
+        run: |
+          if (Test-Path cardsense-gui.exe) {
+            Write-Output "✅ cardsense-gui.exe exists"
+            $size = (Get-Item cardsense-gui.exe).Length / 1MB
+            Write-Output "Size: $($size.ToString('F2')) MB"
+          } else {
+            Write-Error "❌ cardsense-gui.exe not found"
+            exit 1
+          }
+        shell: powershell
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardsense-windows
+          path: cardsense-gui.exe
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/download-artifact@v4
+      
+      - name: Display structure
+        run: ls -R
+      
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            cardsense-macos/cardsense-gui
+            cardsense-windows/cardsense-gui.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

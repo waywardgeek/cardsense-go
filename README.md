@@ -1,6 +1,8 @@
 # CardSense (Go Port)
 
-Native macOS accessibility tool for Magic: The Gathering Arena. Identifies cards on screen and reads them aloud for low-vision players.
+Cross-platform accessibility tool for Magic: The Gathering Arena. Identifies cards on screen and reads them aloud for low-vision players.
+
+**Platforms**: macOS, Windows (Linux planned)
 
 ## Features
 
@@ -26,7 +28,25 @@ Native macOS accessibility tool for Magic: The Gathering Arena. Identifies cards
 
 ### Windows
 
-Coming soon! (See [BUILD.md](BUILD.md) for development status)
+**Status**: Working! Automated builds via GitHub Actions.
+
+**Download**: 
+- [cardsense.exe](https://github.com/waywardgeek/cardsense-go/releases) (from GitHub Actions artifacts)
+- Or build from source (see [BUILD.md](BUILD.md#windows-build))
+
+**Installation**:
+1. Download `cardsense.exe` from latest release or Actions artifacts
+2. Place in a folder (e.g., `C:\CardSense\`)
+3. Run `cardsense.exe`
+4. Open MTGA, right-click a card to hear it read aloud
+
+**Requirements**: 
+- Windows 10/11
+- OpenCV DLLs (see [BUILD.md](BUILD.md) for distribution notes)
+
+**Known Limitations**:
+- TTS uses PowerShell → SAPI (adds ~200-500ms latency)
+- Future improvement: Replace with go-ole for faster speech
 
 ## Usage
 

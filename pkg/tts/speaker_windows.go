@@ -43,9 +43,27 @@ func (s *WindowsSpeaker) Speak(text string) {
 
 func (s *WindowsSpeaker) speakAsync(text string) {
 	s.mu.Lock()
-	// TODO: Replace with proper SAPI via cgo
-	// For now, use PowerShell as a fallback (slower but works)
-	psScript := fmt.Sprintf(`Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Rate = 10; $synth.Speak('%s')`, text)
+	// Convert WPM to SAPI rate (-10 to +10)
+	// SAPI rate scale: -10 (slow) to +10 (fast)
+	// Map 150 WPM -> -10, 450 WPM -> +10 (linear mapping)
+	sapiRate := (s.rate - 300) / 15
+	if sapiRate < -10 {
+		sapiRate = -10
+	} else if sapiRate > 10 {
+		sapiRate = 10
+	}
+
+	// Build PowerShell script with proper rate and optional voice
+	var psScript string
+	if s.voice != "" {
+		// Set specific voice if provided
+		psScript = fmt.Sprintf(`Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.SelectVoice('%s'); $synth.Rate = %d; $synth.Speak('%s')`, s.voice, sapiRate, text)
+	} else {
+		// Use default voice
+		psScript = fmt.Sprintf(`Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Rate = %d; $synth.Speak('%s')`, sapiRate, text)
+	}
+
+	// TODO: Replace with proper SAPI via cgo for better performance (eliminates ~200-500ms PowerShell overhead)
 	s.cmd = exec.Command("powershell", "-Command", psScript)
 	s.mu.Unlock()
 
@@ -64,12 +82,11 @@ func (s *WindowsSpeaker) Cancel() {
 }
 
 // SetRate sets the speech rate in words per minute
+// Maps WPM to SAPI rate: 150 WPM -> -10, 300 WPM -> 0, 450 WPM -> +10
 func (s *WindowsSpeaker) SetRate(wpm int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// SAPI rate range is -10 to +10, map from WPM
-	// 550 WPM -> +10
-	s.rate = min(450, wpm)
+	s.rate = wpm
 }
 
 // SetVoice sets the voice by name
@@ -91,11 +108,4 @@ func (s *WindowsSpeaker) Close() error {
 	s.Cancel()
 	close(s.cancel)
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
