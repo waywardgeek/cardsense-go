@@ -348,32 +348,66 @@ Compress-Archive -Path dist\* -DestinationPath cardsense-windows.zip
 
 Users extract and run `cardsense.exe`.
 
-#### Installer (Optional - Future)
+#### Windows Installer (Recommended)
 
-For a more polished distribution, create an installer with [Inno Setup](https://jrsoftware.org/isinfo.php):
+For a professional distribution with proper installation and uninstallation:
 
-```iss
-[Setup]
-AppName=CardSense
-AppVersion=0.3.0
-DefaultDirName={pf}\CardSense
-DefaultGroupName=CardSense
-OutputDir=dist
-OutputBaseFilename=cardsense-setup
+**Prerequisites:**
+1. Download and install [Inno Setup](https://jrsoftware.org/isdl.php) (Inno Setup 6 recommended)
+2. Build the executable (see above)
+3. Have OpenCV DLLs from CI build or manual build
+4. Have Tesseract installed
+5. Have hash files (from Python version or generated)
 
-[Files]
-Source: "cardsense.exe"; DestDir: "{app}"
-Source: "opencv_world*.dll"; DestDir: "{app}"
-Source: "tesseract.exe"; DestDir: "{app}"
+**Build the installer:**
 
-[Icons]
-Name: "{group}\CardSense"; Filename: "{app}\cardsense.exe"
-```
-
-Compile with:
 ```powershell
-iscc installer.iss
+# Navigate to installer directory
+cd installer
+
+# Run the build script
+.\build-installer.ps1
 ```
+
+The script will:
+- Collect OpenCV DLLs from `C:\opencv\build\install\x64\mingw\bin`
+- Collect Tesseract from `C:\Program Files\Tesseract-OCR`
+- Copy hash files (26MB) for instant startup
+- Build Inno Setup installer using `cardsense-setup.iss`
+- Output: `dist\cardsense-setup-0.3.0.exe` (~60-70MB)
+
+**Custom paths:**
+
+```powershell
+.\build-installer.ps1 -OpenCVPath "C:\custom\opencv\bin" -TesseractPath "C:\custom\tesseract"
+```
+
+**Manual Inno Setup build:**
+
+If you prefer to build manually or customize:
+
+1. Edit `installer/cardsense-setup.iss` as needed
+2. Right-click `cardsense-setup.iss` → Compile
+3. Or use command line:
+   ```powershell
+   & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\cardsense-setup.iss
+   ```
+
+**What's included in the installer:**
+- `cardsense-gui.exe` (35-40MB)
+- OpenCV DLLs (~15-20MB)
+- Tesseract executable + tessdata (~5MB)
+- Hash files: 26MB (phash_index.npz + phash_meta.json)
+- Start menu shortcuts
+- Desktop icon (optional)
+- Uninstaller
+
+**Installation experience:**
+- Double-click `cardsense-setup-0.3.0.exe`
+- Choose install location (default: `C:\Program Files\CardSense`)
+- Optionally create desktop icon
+- Launch CardSense after installation
+- Everything bundled - no additional downloads needed
 
 ### Platform Differences
 
