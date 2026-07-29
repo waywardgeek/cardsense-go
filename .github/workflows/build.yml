@@ -72,19 +72,11 @@ jobs:
           git clone --depth 1 --branch release https://github.com/hybridgroup/gocv.git C:\gocv-build
         shell: powershell
       
-      - name: Download OpenCV source
+      - name: Download and build OpenCV
         if: steps.cache-opencv-build.outputs.cache-hit != 'true'
         shell: cmd
         run: |
-          cd C:\gocv-build
-          call win_download_opencv.cmd C:\opencv
-      
-      - name: Build OpenCV with MinGW
-        if: steps.cache-opencv-build.outputs.cache-hit != 'true'
-        shell: cmd
-        run: |
-          cd C:\gocv-build
-          call win_build_opencv.cmd C:\opencv
+          cd C:\gocv-build && call win_download_opencv.cmd C:\opencv && call win_build_opencv.cmd C:\opencv
       
       - name: Save cached OpenCV build
         uses: actions/cache/save@v4
