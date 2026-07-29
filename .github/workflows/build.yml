@@ -58,39 +58,57 @@ jobs:
         with:
           go-version: '1.25.x'
       
-      - name: Install MinGW (C compiler for CGO)
+      - name: Restore cached OpenCV build
+        uses: actions/cache/restore@v4
+        id: cache-opencv-build
+        with:
+          key: opencv-build-4130-windows-cardsense-v1
+          path: |
+            C:\opencv\build
+      
+      - name: Clone gocv for build scripts
+        if: steps.cache-opencv-build.outputs.cache-hit != 'true'
         run: |
-          choco install mingw -y
+          git clone --depth 1 --branch release https://github.com/hybridgroup/gocv.git C:\gocv-build
         shell: powershell
       
-      - name: Install OpenCV via Chocolatey
+      - name: Download OpenCV source
+        if: steps.cache-opencv-build.outputs.cache-hit != 'true'
+        shell: cmd
         run: |
-          choco install opencv -y
-        shell: powershell
+          cd C:\gocv-build
+          call win_download_opencv.cmd C:\opencv
+      
+      - name: Build OpenCV with MinGW
+        if: steps.cache-opencv-build.outputs.cache-hit != 'true'
+        shell: cmd
+        run: |
+          cd C:\gocv-build
+          call win_build_opencv.cmd C:\opencv
+      
+      - name: Save cached OpenCV build
+        uses: actions/cache/save@v4
+        if: steps.cache-opencv-build.outputs.cache-hit != 'true'
+        with:
+          key: ${{ steps.cache-opencv-build.outputs.cache-primary-key }}
+          path: |
+            C:\opencv\build
       
       - name: Install Tesseract
         run: |
           choco install tesseract -y
         shell: powershell
       
-      - name: Set up OpenCV environment
-        run: |
-          # Add MinGW to PATH (installed by Chocolatey)
-          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $GITHUB_PATH
-          echo "CGO_CPPFLAGS=-IC:/tools/opencv/build/include" >> $GITHUB_ENV
-          echo "CGO_LDFLAGS=-LC:/tools/opencv/build/x64/vc16/lib" >> $GITHUB_ENV
-          echo "PATH=C:/tools/opencv/build/x64/vc16/bin;$PATH" >> $GITHUB_ENV
-        shell: bash
-      
       - name: Build
         run: |
-          # Add MinGW to PATH (Chocolatey installs to C:\ProgramData\mingw64\mingw64\bin)
-          $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
-          go build -o cardsense-gui.exe cmd/gui/main.go
+          # Set CGO environment for OpenCV (built with MinGW)
+          $env:CGO_CXXFLAGS = "--std=c++11"
+          $env:CGO_CPPFLAGS = "-IC:\opencv\build\install\include"
+          $env:CGO_LDFLAGS = "-LC:\opencv\build\install\x64\mingw\lib -lopencv_core4130 -lopencv_face4130 -lopencv_videoio4130 -lopencv_imgproc4130 -lopencv_highgui4130 -lopencv_imgcodecs4130 -lopencv_objdetect4130 -lopencv_features2d4130 -lopencv_video4130 -lopencv_dnn4130 -lopencv_xfeatures2d4130 -lopencv_plot4130 -lopencv_tracking4130 -lopencv_img_hash4130 -lopencv_calib3d4130"
+          $env:PATH = "C:\opencv\build\install\x64\mingw\bin;$env:PATH"
+          go build -tags customenv -o cardsense-gui.exe cmd/gui/main.go
         env:
           CGO_ENABLED: 1
-          CGO_CPPFLAGS: -IC:/tools/opencv/build/include
-          CGO_LDFLAGS: -LC:/tools/opencv/build/x64/vc16/lib
         shell: powershell
       
       - name: Test
