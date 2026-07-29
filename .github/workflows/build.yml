@@ -28,6 +28,8 @@ jobs:
           # Suppress deprecation warnings for NSSpeechSynthesizer
           # (macOS 14+ deprecated it in favor of AVSpeechSynthesizer, but we still support macOS 10.13+)
           export CGO_CFLAGS="-Wno-deprecated-declarations"
+          # Set PKG_CONFIG_PATH for OpenCV (Homebrew on Apple Silicon uses /opt/homebrew)
+          export PKG_CONFIG_PATH="$(brew --prefix opencv)/lib/pkgconfig:$PKG_CONFIG_PATH"
           go build -o cardsense-gui cmd/gui/main.go
       
       - name: Test
@@ -71,6 +73,8 @@ jobs:
       
       - name: Set up OpenCV environment
         run: |
+          # Add MinGW to PATH (installed by Chocolatey)
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $GITHUB_PATH
           echo "CGO_CPPFLAGS=-IC:/tools/opencv/build/include" >> $GITHUB_ENV
           echo "CGO_LDFLAGS=-LC:/tools/opencv/build/x64/vc16/lib" >> $GITHUB_ENV
           echo "PATH=C:/tools/opencv/build/x64/vc16/bin;$PATH" >> $GITHUB_ENV
