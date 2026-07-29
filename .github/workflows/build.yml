@@ -21,15 +21,17 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install opencv tesseract
+          # Install OpenCV 4 (opencv@4) instead of opencv (latest = 5.x)
+          # gocv v0.43.0 requires OpenCV 4.x
+          brew install opencv@4 tesseract
       
       - name: Build
         run: |
           # Suppress deprecation warnings for NSSpeechSynthesizer
           # (macOS 14+ deprecated it in favor of AVSpeechSynthesizer, but we still support macOS 10.13+)
           export CGO_CFLAGS="-Wno-deprecated-declarations"
-          # Set PKG_CONFIG_PATH for OpenCV (Homebrew on Apple Silicon uses /opt/homebrew)
-          export PKG_CONFIG_PATH="$(brew --prefix opencv)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          # Set PKG_CONFIG_PATH for OpenCV 4 (Homebrew on Apple Silicon uses /opt/homebrew)
+          export PKG_CONFIG_PATH="$(brew --prefix opencv@4)/lib/pkgconfig:$PKG_CONFIG_PATH"
           go build -o cardsense-gui cmd/gui/main.go
       
       - name: Test
@@ -82,9 +84,13 @@ jobs:
       
       - name: Build
         run: |
+          # Add MinGW to PATH (Chocolatey installs to C:\ProgramData\mingw64\mingw64\bin)
+          $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
           go build -o cardsense-gui.exe cmd/gui/main.go
         env:
           CGO_ENABLED: 1
+          CGO_CPPFLAGS: -IC:/tools/opencv/build/include
+          CGO_LDFLAGS: -LC:/tools/opencv/build/x64/vc16/lib
         shell: powershell
       
       - name: Test
