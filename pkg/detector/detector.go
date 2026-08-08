@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -182,6 +183,94 @@ func (d *Detector) loopInner() {
 			gocv.CvtColor(crop, &cropGray, gocv.ColorBGRToGray)
 			crop.Close()
 			
+			// Check for calibration opportunity BEFORE full identification
+			// If uncalibrated and there's strong visual evidence of a card
+			// trigger calibration even without a confident match
+			if !calibrated {
+				h := cropGray.Rows()
+				w := cropGray.Cols()
+				aspect := float64(w) / float64(h)
+				
+				// Do a quick pHash check to see if this looks card-like
+				hashes := hash.DualPHash(cropGray, nil)
+				distances := hash.HammingScan(hashes, d.idx.Bits)
+				
+				// Find min distance AND margin (distance to next different card)
+				type match struct {
+					idx  int
+					dist int
+				}
+				matches := make([]match, len(distances))
+				for i, dist := range distances {
+					matches[i] = match{i, dist}
+				}
+				sort.Slice(matches, func(i, j int) bool {
+					return matches[i].dist < matches[j].dist
+				})
+				
+				minDist := matches[0].dist
+				topName := d.idx.Names[matches[0].idx]
+				
+				// Find margin
+				margin := 1000
+				for i := 1; i < len(matches); i++ {
+					if d.idx.Names[matches[i].idx] != topName {
+						margin = matches[i].dist - minDist
+						break
+					}
+				}
+				
+				// Calibrate only on STRONG evidence of a real card.
+				//
+				// Measured populations on a correctly-shaped box (2026-08-07):
+				//   real card : dist 78 pre-twiddle -> 54 post, margin 88
+				//   non-card  : dist 190-198,                   margin 0-4
+				//
+				// The old gate was `minDist < 200`, which accepts literally
+				// everything including empty board views, so the detector would
+				// calibrate on noise and then persist it -- overwriting a good
+				// dist=54 box with a dist=190 one. Since calibration is saved to
+				// disk and becomes the scaling source for later runs, a single
+				// bad frame poisoned every future session.
+				//
+				// 150 sits in the empty gap between the two populations.
+				const calTriggerDist = 150
+				if minDist < calTriggerDist && aspect >= 0.53 && aspect <= 0.85 {
+					log.Printf("[CALIBRATE] Visual evidence of card (dist=%d, margin=%d, aspect=%.3f), triggering calibration...", minDist, margin, aspect)
+					d.speaker.Speak("Calibrating")
+					time.Sleep(300 * time.Millisecond)
+					
+					shot2, err := capture.CaptureScreen(0)
+					if err != nil {
+						log.Printf("[ERROR] Screen capture for twiddle failed: %v", err)
+					} else {
+						newBox, newDist, _ := d.twiddle(shot2, cardBox)
+						shot2.Close()
+						
+						// Only accept + persist a calibration that actually
+						// converged onto a card. Otherwise leave the box alone
+						// and stay uncalibrated so we can retry on a later frame.
+						const calAcceptDist = 100
+						if newDist < calAcceptDist {
+							cardBox = newBox
+							calibrated = true
+							
+							box := capture.Box{
+								X: cardBox.Min.X,
+								Y: cardBox.Min.Y,
+								W: cardBox.Dx(),
+								H: cardBox.Dy(),
+							}
+							capture.SaveCalibration(d.dataDir, W, H, box)
+							
+							log.Printf("[CALIBRATE] Saved calibration: dist improved to %d", newDist)
+						} else {
+							log.Printf("[CALIBRATE] REJECTED: twiddle only reached dist=%d (need <%d) - not saving, will retry", newDist, calAcceptDist)
+						}
+					}
+				}
+			}
+			
 			// Identify card (with OCR fallback enabled)
 			hit := d.idx.Identify(cropGray, true, 280, 20, nil, true)
 			
@@ -358,8 +447,11 @@ func (d *Detector) twiddle(shot gocv.Mat, box image.Rectangle) (image.Rectangle,
 	
 	bestScore := score(x, y, w, h)
 	
-	// Two-pass hill climbing: 1% then 0.1%
-	for _, pct := range []float64{0.01, 0.001} {
+	// Coarse-to-fine hill climbing. The coarse passes (8%, 3%) let the search
+	// escape a bad starting box — e.g. one scaled from a different display —
+	// which 1%/0.1% steps alone cannot do, since they get stuck in whatever
+	// local minimum the initial box happens to sit in.
+	for _, pct := range []float64{0.08, 0.03, 0.01, 0.001} {
 		improved := true
 		rounds := 0
 		

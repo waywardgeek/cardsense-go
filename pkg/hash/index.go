@@ -316,50 +316,78 @@ func (idx *CardIndex) Identify(gray gocv.Mat, sweep bool, maxDist int, minMargin
 
 	// pHash failed or low confidence - try OCR fallback
 	if !ocrFallback {
+		fmt.Printf("[DEBUG] pHash failed: dist=%d (max=%d), margin=%d (min=%d), OCR disabled\n", 
+			topDist, maxDist, margin, minMargin)
 		return nil
 	}
 
-	// Guard 1: pHash distance must be reasonable (not random noise)
-	// Tightened from 300 to 200 to reduce false positives
-	if topDist > 200 {
+	fmt.Printf("[DEBUG] pHash failed (dist=%d, margin=%d), trying OCR fallback...\n", topDist, margin)
+
+	// Guard 1: pHash distance must be plausibly a card, not noise.
+	//
+	// Measured populations on a correctly-shaped box (2026-08-07, laptop panel):
+	//   real card : dist 60-90    (margin 84+)
+	//   empty board / UI : dist 190-202 (margin 0-6)
+	//
+	// The old threshold of 200 sat INSIDE the noise cluster, so board views
+	// reached the OCR path routinely. Tesseract then read garbage ('Wg ZAM')
+	// and Scryfall's FUZZY search happily resolved it to a real card name
+	// ('Merrow Grimeblotter'). For an accessibility tool, confidently speaking
+	// the wrong card is worse than saying nothing at all -- the user has no way
+	// to know it's wrong.
+	//
+	// 150 sits in the empty gap between the two populations.
+	if topDist > 150 {
+		fmt.Printf("[DEBUG] OCR Guard 1 FAILED: distance %d > 150 (too far, likely noise)\n", topDist)
 		return nil
 	}
 	
 	// Guard 1b: pHash margin must not be too low (prevents multi-card captures)
 	// If pHash can't distinguish between cards (low margin), OCR is likely reading
 	// random text from a board state rather than a single card.
-	// Lowered from 10 to 3 to allow edge cases like Raise Dead (margin=4)
-	if margin < 3 {
+	// Lowered from 10→3→1 to handle laptop display (narrow aspect reduces pHash distinctiveness)
+	if margin < 1 {
+		fmt.Printf("[DEBUG] OCR Guard 1b FAILED: margin %d < 1 (likely multi-card capture)\n", margin)
 		return nil
 	}
 
-	// Guard 2: Aspect ratio must be card-like (0.60-0.85)
-	// Widened from 0.65-0.80 to handle slight variations in screen capture
+	// Guard 2: Aspect ratio must be card-like (0.53-0.85)
+	// Widened from 0.60 to 0.53 to handle laptop display scaling (calibration box is 339x629 = 0.539)
 	h := gray.Rows()
 	w := gray.Cols()
 	aspect := float64(w) / float64(h)
-	if aspect < 0.60 || aspect > 0.85 {
+	if aspect < 0.53 || aspect > 0.85 {
+		fmt.Printf("[DEBUG] OCR Guard 2 FAILED: aspect %.3f not in range [0.53, 0.85] (crop is %dx%d)\n", 
+			aspect, w, h)
 		return nil
 	}
 
 	// Try OCR extraction
+	fmt.Printf("[DEBUG] OCR Guards passed (dist=%d, margin=%d, aspect=%.3f), extracting text...\n", 
+		topDist, margin, aspect)
 	cardName := ocrCardName(gray)
 	if cardName == "" {
+		fmt.Printf("[DEBUG] OCR extraction FAILED: no text extracted\n")
 		return nil
 	}
+	fmt.Printf("[DEBUG] OCR extracted: '%s'\n", cardName)
 
 	// Guard 3: OCR text must look like a real card name
 	if !validateOCRText(cardName) {
+		fmt.Printf("[DEBUG] OCR Guard 3 FAILED: text '%s' failed validation\n", cardName)
 		return nil
 	}
 
 	// Query Scryfall
+	fmt.Printf("[DEBUG] Querying Scryfall for '%s'...\n", cardName)
 	ocrMeta := queryScryfall(cardName)
 	if ocrMeta == nil {
+		fmt.Printf("[DEBUG] Scryfall query FAILED: no match for '%s'\n", cardName)
 		return nil
 	}
 
 	// Success! Return with synthetic dist/margin to indicate OCR was used
+	fmt.Printf("[DEBUG] OCR SUCCESS: matched '%s'\n", ocrMeta.Name)
 	ocrMeta.OCRText = cardName
 	return &IdentifyResult{
 		Meta:   *ocrMeta,
