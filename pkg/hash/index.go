@@ -323,22 +323,20 @@ func (idx *CardIndex) Identify(gray gocv.Mat, sweep bool, maxDist int, minMargin
 
 	fmt.Printf("[DEBUG] pHash failed (dist=%d, margin=%d), trying OCR fallback...\n", topDist, margin)
 
-	// Guard 1: pHash distance must be plausibly a card, not noise.
+	// Guard 1: pHash distance must be plausibly a card, not random noise.
 	//
-	// Measured populations on a correctly-shaped box (2026-08-07, laptop panel):
-	//   real card : dist 60-90    (margin 84+)
-	//   empty board / UI : dist 190-202 (margin 0-6)
+	// 200, NOT 150. I briefly tightened this to 150 based on two cards that
+	// matched at 48-100, and it broke every card that relies on OCR: a KNOWN-GOOD
+	// match (Octoprophet, 2026-07-27) has pHash dist=172 margin=10 -- it fails
+	// the pHash gate on low margin and is rescued by OCR. Cutting at 150 turned
+	// that rescue into silence for every such card.
 	//
-	// The old threshold of 200 sat INSIDE the noise cluster, so board views
-	// reached the OCR path routinely. Tesseract then read garbage ('Wg ZAM')
-	// and Scryfall's FUZZY search happily resolved it to a real card name
-	// ('Merrow Grimeblotter'). For an accessibility tool, confidently speaking
-	// the wrong card is worse than saying nothing at all -- the user has no way
-	// to know it's wrong.
-	//
-	// 150 sits in the empty gap between the two populations.
-	if topDist > 150 {
-		fmt.Printf("[DEBUG] OCR Guard 1 FAILED: distance %d > 150 (too far, likely noise)\n", topDist)
+	// The noise floor sits around 186-202, so 200 does overlap the noise band.
+	// That overlap is handled by the TEXT guards below (a real card title must
+	// be extracted and validated), not by distance alone. Distance cannot
+	// separate these populations cleanly; text can.
+	if topDist > 200 {
+		fmt.Printf("[DEBUG] OCR Guard 1 FAILED: distance %d > 200 (too far, likely noise)\n", topDist)
 		return nil
 	}
 	

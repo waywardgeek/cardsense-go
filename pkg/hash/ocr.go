@@ -3,6 +3,7 @@ package hash
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"io"
 	"net/http"
@@ -88,6 +89,61 @@ func ocrCardName(grayCrop gocv.Mat) string {
 	return cleaned
 }
 
+// plausibleMatch reports whether Scryfall's fuzzy answer is close enough to the
+// text OCR actually read to be trusted.
+//
+// Scryfall will happily map arbitrary noise onto a real card name. Requiring a
+// character-level resemblance keeps genuine OCR near-misses (dropped/î
+// substituted letters) while rejecting invented matches:
+//
+//	'Octoprophef'  -> 'Octoprophet'         ACCEPT (ratio ~0.9)
+//	'Badgermole C' -> 'Badgermole Cub'      ACCEPT (prefix)
+//	'Wg ZAM'       -> 'Merrow Grimeblotter' REJECT
+//	'Wise'         -> "Voyage's End"        REJECT
+func plausibleMatch(ocrText, cardName string) bool {
+	norm := func(s string) string {
+		var b strings.Builder
+		for _, r := range strings.ToLower(s) {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+
+	a, b := norm(ocrText), norm(cardName)
+	if len(a) < 4 || len(b) == 0 {
+		// Too little signal to verify. 'Wise' (4 chars) matching a long name is
+		// exactly the false-positive shape, so demand real length.
+		return false
+	}
+
+	// Accept a clean prefix relationship (OCR truncated the title).
+	if strings.HasPrefix(b, a) || strings.HasPrefix(a, b) {
+		return true
+	}
+
+	// Otherwise require a decent character-subsequence overlap: walk b looking
+	// for a's characters in order. This tolerates substitutions and dropped
+	// letters without accepting unrelated words.
+	matched, j := 0, 0
+	for i := 0; i < len(a) && j < len(b); i++ {
+		for j < len(b) && b[j] != a[i] {
+			j++
+		}
+		if j < len(b) {
+			matched++
+			j++
+		}
+	}
+
+	longer := len(a)
+	if len(b) > longer {
+		longer = len(b)
+	}
+	return float64(matched)/float64(longer) >= 0.6
+}
+
 // queryScryfall queries Scryfall API for card by fuzzy name match.
 // Returns CardMeta or nil if not found.
 // Scryfall's fuzzy search is very forgiving of OCR errors.
@@ -144,6 +200,18 @@ func queryScryfall(cardName string) *CardMeta {
 		meta.ID = id
 	}
 	if name, ok := result["name"].(string); ok {
+		// Scryfall's fuzzy search is EXTREMELY forgiving -- that is useful for
+		// real OCR noise ('Octoprophef' -> 'Octoprophet') but dangerous for
+		// garbage: 'Wg ZAM' resolved to 'Merrow Grimeblotter' and was spoken as
+		// a confident answer. For an accessibility tool a wrong name is the
+		// worst outcome, because the user cannot tell it is wrong.
+		//
+		// So verify the answer resembles what we actually read. This keeps the
+		// forgiveness for near-misses while rejecting invented matches.
+		if !plausibleMatch(cardName, name) {
+			fmt.Printf("[DEBUG] OCR REJECTED: Scryfall returned %q for OCR text %q (too dissimilar)\n", name, cardName)
+			return nil
+		}
 		meta.Name = name
 	}
 	if typeLine, ok := result["type_line"].(string); ok {
