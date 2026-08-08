@@ -21,7 +21,25 @@ const (
 
 // ArtBox defines the art region as fractions of card dimensions
 // (y0, y1, x0, x1) = (0.11, 0.56, 0.06, 0.94)
+// This matches the SCRYFALL printed-card layout, which is what the index is
+// built from. Do NOT use it for live MTGA captures -- see QueryArtBox.
 var ArtBox = struct{ Y0, Y1, X0, X1 float64 }{0.11, 0.56, 0.06, 0.94}
+
+// QueryArtBox is the art region for LIVE MTGA CAPTURES.
+//
+// MTGA does not display the printed card scan; it re-renders the card with its
+// own layout. The art window sits HIGHER and is TALLER than on the printed
+// card, and there is no outer black border. Hashing a live capture with the
+// Scryfall fractions therefore compares two DIFFERENT PHYSICAL REGIONS, which
+// makes the art half of the dual hash pure noise.
+//
+// Measured on a live Badgermole Cub capture vs its (correct, dist=0) index art:
+//
+//	art region with ArtBox      fractions (0.11..0.56): 130/256  <- random
+//	art region with QueryArtBox fractions (0.05..0.52):  36/256  <- real match
+//
+// Found by sweeping y0/y1 for the live crop against the Scryfall art region.
+var QueryArtBox = struct{ Y0, Y1, X0, X1 float64 }{0.05, 0.52, 0.04, 0.96}
 
 // precomputedPopCount contains bit counts for all byte values 0-255
 var precomputedPopCount = makePopCountTable()
@@ -85,7 +103,20 @@ func phash256(gray gocv.Mat) []byte {
 
 // DualPHash computes the dual 512-bit pHash: full image (256 bits) + art box (256 bits).
 // borderTrim is optional (left, top, right, bottom) pixels to remove before hashing.
+// DualPHash computes the dual hash using the SCRYFALL art fractions (ArtBox).
+// Use this for INDEX BUILDING and for hashing Scryfall reference images.
 func DualPHash(gray gocv.Mat, borderTrim *[4]int) []byte {
+	return dualPHashWith(gray, borderTrim, ArtBox.X0, ArtBox.Y0, ArtBox.X1, ArtBox.Y1)
+}
+
+// DualPHashQuery computes the dual hash using the MTGA art fractions
+// (QueryArtBox). Use this for LIVE SCREEN CAPTURES so that the art half of the
+// hash covers the same physical artwork as the index entries.
+func DualPHashQuery(gray gocv.Mat, borderTrim *[4]int) []byte {
+	return dualPHashWith(gray, borderTrim, QueryArtBox.X0, QueryArtBox.Y0, QueryArtBox.X1, QueryArtBox.Y1)
+}
+
+func dualPHashWith(gray gocv.Mat, borderTrim *[4]int, ax0, ay0, ax1, ay1 float64) []byte {
 	// Apply border trim if specified
 	working := gray
 	if borderTrim != nil {
@@ -105,10 +136,10 @@ func DualPHash(gray gocv.Mat, borderTrim *[4]int) []byte {
 	fullHash := phash256(working)
 
 	// Extract art box from canonical
-	y0 := int(ArtBox.Y0 * CH)
-	y1 := int(ArtBox.Y1 * CH)
-	x0 := int(ArtBox.X0 * CW)
-	x1 := int(ArtBox.X1 * CW)
+	y0 := int(ay0 * CH)
+	y1 := int(ay1 * CH)
+	x0 := int(ax0 * CW)
+	x1 := int(ax1 * CW)
 	artRect := image.Rect(x0, y0, x1, y1)
 	artRegion := canonical.Region(artRect)
 	artBox := gocv.NewMat()

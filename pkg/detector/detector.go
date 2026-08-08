@@ -256,7 +256,7 @@ func (d *Detector) loopInner() {
 				aspect := float64(w) / float64(h)
 				
 				// Do a quick pHash check to see if this looks card-like
-				hashes := hash.DualPHash(cropGray, nil)
+				hashes := hash.DualPHashQuery(cropGray, nil)
 				distances := hash.HammingScan(hashes, d.idx.Bits)
 				
 				// Find min distance AND margin (distance to next different card)
@@ -508,7 +508,7 @@ func (d *Detector) twiddle(shot gocv.Mat, box image.Rectangle) (image.Rectangle,
 		gocv.CvtColor(crop, &cropGray, gocv.ColorBGRToGray)
 		crop.Close()
 		
-		hashes := hash.DualPHash(cropGray, nil)
+		hashes := hash.DualPHashQuery(cropGray, nil)
 		cropGray.Close()
 		
 		distances := hash.HammingScan(hashes, d.idx.Bits)

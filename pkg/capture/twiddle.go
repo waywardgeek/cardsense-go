@@ -33,7 +33,8 @@ func Twiddle(shot gocv.Mat, box Box, idx *hash.CardIndex) (Box, int, int) {
 		gocv.CvtColor(rect, &gray, gocv.ColorBGRToGray)
 
 		// Compute pHash
-		hashBytes := hash.DualPHash(gray, nil)
+		// LIVE CAPTURE path -- see QueryArtBox in pkg/hash/phash.go.
+		hashBytes := hash.DualPHashQuery(gray, nil)
 
 		// Scan index and find minimum distance
 		distances := hash.HammingScan(hashBytes, idx.Bits)

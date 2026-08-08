@@ -258,7 +258,9 @@ func (idx *CardIndex) Identify(gray gocv.Mat, sweep bool, maxDist int, minMargin
 
 	var best []int
 	for _, v := range variants {
-		hashBytes := DualPHash(v, nil) // borderTrim already applied in AlignVariants
+		// LIVE CAPTURE path: must use the MTGA art fractions, not the Scryfall
+		// ones the index was built with. See QueryArtBox in phash.go.
+		hashBytes := DualPHashQuery(v, nil) // borderTrim already applied in AlignVariants
 		distances := HammingScan(hashBytes, idx.Bits)
 		if best == nil {
 			best = distances
