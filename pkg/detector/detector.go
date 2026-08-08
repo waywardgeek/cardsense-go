@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gocv.io/x/gocv"
@@ -21,6 +22,26 @@ const (
 	
 	// Frame interval in milliseconds (~5 fps for reduced CPU usage)
 	FRAME_INTERVAL = 200 * time.Millisecond
+
+	// MATCH_MAX_DIST is the maximum pHash distance accepted as a real match.
+	//
+	// Was 280, which admitted outright false positives: a board view at
+	// dist=172 was accepted as "Golgari Thug" and would have been spoken.
+	// Measured populations on a calibrated box:
+	//   real card : dist 48-100  (Badgermole Cub matched at 52)
+	//   noise     : dist 170-202
+	// 150 sits in the gap.
+	MATCH_MAX_DIST = 150
+
+	// MATCH_MIN_MARGIN is the minimum lead over the best differently-named card.
+	//
+	// Lowered from 20 to 15. A KNOWN-GOOD match (Badgermole Cub) measured
+	// dist=52 margin=18: a real card can legitimately have a small margin when
+	// similar art exists in the index, so a threshold of 20 would reject it and
+	// push it down the OCR path -- exactly the path that invents wrong names.
+	// MATCH_MAX_DIST is the discriminator doing the real work, since it already
+	// excludes the entire noise band (170+) regardless of margin.
+	MATCH_MIN_MARGIN = 15
 )
 
 // StatusCallback is called with status updates for the GUI
@@ -37,10 +58,38 @@ type Detector struct {
 	dataDir     string
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
+
+	// recalRequested is set by RequestRecalibrate (GUI thread) and consumed by
+	// the detection loop. int32 + atomics because the two run on different
+	// goroutines.
+	recalRequested int32
+}
+
+// RequestRecalibrate asks the detection loop to discard its current calibration
+// and start over from the reference box scaled to the current display.
+//
+// Needed when moving between displays: the saved calibration is specific to the
+// resolution it was measured on, and while it is rescaled automatically, an
+// explicit reset is the reliable escape hatch if the rescaled box does not
+// converge (or if a previous session persisted a bad box).
+//
+// Safe to call whether or not the detector is running.
+func (d *Detector) RequestRecalibrate() {
+	atomic.StoreInt32(&d.recalRequested, 1)
 }
 
 // New creates a new Detector
 func New(speaker tts.Speaker, dataDir string, onStatus StatusCallback, debug bool) *Detector {
+	// Resolve the data directory ONCE, here, rather than letting each consumer
+	// decide what "" means. LoadCardIndex silently substitutes hash.DataDir()
+	// for an empty string, but LoadCalibration/SaveCalibration did not -- they
+	// built a RELATIVE path ("calibration.json"), so every save failed
+	// (os.MkdirAll("") returns an error) and every load missed. The detector
+	// therefore re-calibrated from scratch on every launch while logging
+	// "Saved calibration", because the error return was discarded.
+	if dataDir == "" {
+		dataDir = hash.DataDir()
+	}
 	return &Detector{
 		speaker:     speaker,
 		onStatus:    onStatus,
@@ -164,6 +213,21 @@ func (d *Detector) loopInner() {
 			d.setStatus("⏹️ Stopped")
 			return
 		case <-ticker.C:
+			// Honour an explicit recalibration request from the GUI.
+			if atomic.SwapInt32(&d.recalRequested, 0) == 1 {
+				if err := capture.ClearCalibration(d.dataDir); err != nil {
+					log.Printf("[ERROR] Could not clear saved calibration: %v", err)
+				}
+				def := capture.DefaultBox(W, H)
+				cardBox = image.Rect(def.X, def.Y, def.X+def.W, def.Y+def.H)
+				calibrated = false
+				lastName = "" // so the same card re-announces after recalibrating
+				log.Printf("[CALIBRATE] Manual recalibration requested: reset to default box (%d,%d,%d,%d) for %dx%d",
+					def.X, def.Y, def.W, def.H, W, H)
+				d.setStatus("🎯 Recalibrating - hover a card...")
+				d.speaker.Speak("Recalibrating. Hover a card.")
+			}
+
 			// Capture screen
 			shot, err := capture.CaptureScreen(0)
 			if err != nil {
@@ -261,9 +325,11 @@ func (d *Detector) loopInner() {
 								W: cardBox.Dx(),
 								H: cardBox.Dy(),
 							}
-							capture.SaveCalibration(d.dataDir, W, H, box)
-							
-							log.Printf("[CALIBRATE] Saved calibration: dist improved to %d", newDist)
+							if err := capture.SaveCalibration(d.dataDir, W, H, box); err != nil {
+								log.Printf("[ERROR] Could not persist calibration: %v", err)
+							} else {
+								log.Printf("[CALIBRATE] Saved calibration: dist improved to %d", newDist)
+							}
 						} else {
 							log.Printf("[CALIBRATE] REJECTED: twiddle only reached dist=%d (need <%d) - not saving, will retry", newDist, calAcceptDist)
 						}
@@ -271,8 +337,18 @@ func (d *Detector) loopInner() {
 				}
 			}
 			
-			// Identify card (with OCR fallback enabled)
-			hit := d.idx.Identify(cropGray, true, 280, 20, nil, true)
+			// Identify card (with OCR fallback enabled).
+			//
+			// maxDist was 280, which is far looser than the measured data
+			// supports and admitted outright false positives: a board view at
+			// dist=172/margin=20 was accepted as "Golgari Thug" and would have
+			// been SPOKEN. Measured on a calibrated box (2026-08-07):
+			//   real card : dist 48-100, margin 72-88
+			//   noise     : dist 170-202, margin 0-20
+			// MATCH_MAX_DIST sits in the gap. Speaking a wrong card name is the
+			// worst failure mode for an accessibility tool -- the user has no
+			// way to know it is wrong -- so prefer silence when uncertain.
+			hit := d.idx.Identify(cropGray, true, MATCH_MAX_DIST, MATCH_MIN_MARGIN, nil, true)
 			
 			// Save debug crop BEFORE closing cropGray
 			var debugCrop gocv.Mat
@@ -333,7 +409,7 @@ func (d *Detector) loopInner() {
 							gocv.CvtColor(crop, &cropGray, gocv.ColorBGRToGray)
 							crop.Close()
 							
-							hit2 := d.idx.Identify(cropGray, true, 280, 20, nil, false)
+							hit2 := d.idx.Identify(cropGray, true, MATCH_MAX_DIST, MATCH_MIN_MARGIN, nil, false)
 							cropGray.Close()
 							shot3.Close()
 							

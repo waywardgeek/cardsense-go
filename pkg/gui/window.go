@@ -153,10 +153,20 @@ func BuildGUI(dataDir string, debug bool) {
 	})
 	stopButton.Disable()
 
+	// Recalibrate: discard the current calibration and search again from the
+	// reference box scaled to the current display. Needed when moving between
+	// displays (e.g. 4K external -> laptop panel), where the saved box is
+	// specific to the resolution it was measured on.
+	recalibrateButton := widget.NewButton("🎯  Recalibrate", func() {
+		det.RequestRecalibrate()
+		setStatus("🎯 Recalibrating - hover a card...")
+	})
+
 	buttonFrame := container.NewHBox(
 		layout.NewSpacer(),
 		startButton,
 		stopButton,
+		recalibrateButton,
 		layout.NewSpacer(),
 	)
 

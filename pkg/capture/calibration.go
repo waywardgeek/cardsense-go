@@ -42,36 +42,31 @@ var (
 )
 
 // scaleBox maps a box from one screen resolution to another using a UNIFORM
-// scale factor, preserving the box's aspect ratio.
+// scale factor anchored at the screen ORIGIN (top-left).
 //
-// Using independent scaleX/scaleY (the old behavior) distorts the crop whenever
-// the source and destination displays have different aspect ratios — e.g. a
-// 16:9 4K external vs a 16:10 MacBook panel. A distorted crop can never match a
-// card's pHash, and the twiddle refinement only nudges by 1% so it cannot
-// recover the shape. Uniform scale keeps the card proportions correct; the
-// box's position is scaled about the screen center so it tracks the MTGA
-// window's relative placement.
+// Two things this gets right that the previous versions did not:
+//
+//  1. UNIFORM scale. Using independent scaleX/scaleY distorts the crop whenever
+//     the source and destination aspect ratios differ (a 16:9 -> 16:10 move
+//     squashed the box to aspect 0.537). A distorted crop can never match a
+//     card's pHash. min() preserves card proportions, and also matches how MTGA
+//     scales its UI: with window HEIGHT.
+//
+//  2. ORIGIN anchoring. The hover preview is pinned to the LEFT edge of the
+//     screen, so its offset scales from the origin, not from the center.
+//     Center-anchored scaling pushed x from 15 to 144 going 1470->1920 and
+//     missed the card completely.
 func scaleBox(b Box, fromW, fromH, toW, toH int) Box {
 	scale := float64(toW) / float64(fromW)
 	if s := float64(toH) / float64(fromH); s < scale {
 		scale = s
 	}
 
-	// Scale the box's center offset from the screen center, then re-derive the
-	// origin from the scaled size. This keeps a centered box centered and a
-	// left-anchored box proportionally left-anchored.
-	cx := float64(b.X) + float64(b.W)/2
-	cy := float64(b.Y) + float64(b.H)/2
-	newCx := float64(toW)/2 + (cx-float64(fromW)/2)*scale
-	newCy := float64(toH)/2 + (cy-float64(fromH)/2)*scale
-
-	w := int(float64(b.W) * scale)
-	h := int(float64(b.H) * scale)
 	return Box{
-		X: int(newCx - float64(w)/2),
-		Y: int(newCy - float64(h)/2),
-		W: w,
-		H: h,
+		X: int(float64(b.X) * scale),
+		Y: int(float64(b.Y) * scale),
+		W: int(float64(b.W) * scale),
+		H: int(float64(b.H) * scale),
 	}
 }
 
@@ -107,6 +102,23 @@ func LoadCalibration(dataDir string, screenW, screenH int) (Box, bool) {
 	fmt.Printf("[CALIBRATION] Using default (scaled to %dx%d): (%d,%d,%d,%d)\n",
 		screenW, screenH, scaled.X, scaled.Y, scaled.W, scaled.H)
 	return scaled, false
+}
+
+// DefaultBox returns the reference box scaled to the given screen, ignoring any
+// saved calibration. Used by an explicit "Recalibrate" request so the search
+// restarts from known-good geometry rather than from a possibly-bad saved box.
+func DefaultBox(screenW, screenH int) Box {
+	return scaleBox(RefBox, RefScreen.W, RefScreen.H, screenW, screenH)
+}
+
+// ClearCalibration deletes any saved calibration. Returns nil if none existed.
+func ClearCalibration(dataDir string) error {
+	calFile := filepath.Join(dataDir, "calibration.json")
+	err := os.Remove(calFile)
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // SaveCalibration saves calibrated box for future sessions
