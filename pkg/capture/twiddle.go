@@ -50,7 +50,7 @@ func Twiddle(shot gocv.Mat, box Box, idx *hash.CardIndex) (Box, int, int) {
 	bestScore := score(x, y, w, h)
 
 	// Two-pass hill climbing: coarse (1%) then fine (0.1%)
-	for _, pct := range []float64{0.01, 0.001} {
+	for _, pct := range []float64{0.08, 0.03, 0.01, 0.001} {
 		improved := true
 		rounds := 0
 
